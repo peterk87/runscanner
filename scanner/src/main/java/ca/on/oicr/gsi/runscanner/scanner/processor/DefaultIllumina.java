@@ -8,18 +8,17 @@ import ca.on.oicr.gsi.runscanner.scanner.LatencyHistogram;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.*;
-import com.fasterxml.jackson.databind.Module;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.common.collect.Sets;
 import io.prometheus.client.Counter;
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.w3c.dom.Document;
+
+import javax.xml.xpath.*;
+import java.io.*;
 import java.lang.ProcessBuilder.Redirect;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -30,27 +29,12 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.Scanner;
-import java.util.Set;
-import java.util.TimeZone;
+import java.util.*;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
-import javax.xml.xpath.XPath;
-import javax.xml.xpath.XPathConstants;
-import javax.xml.xpath.XPathExpression;
-import javax.xml.xpath.XPathExpressionException;
-import javax.xml.xpath.XPathFactory;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.w3c.dom.Document;
 
 /**
  * Scan an Illumina sequener's output using the Illumina Interop C++ library.
@@ -163,7 +147,7 @@ public final class DefaultIllumina extends RunProcessor {
 
   @Override
   public Stream<File> getRunsFromRoot(File root) {
-    return Arrays.stream(root.listFiles(f -> f.isDirectory() && !f.getName().equals("Instrument")));
+    return Arrays.stream(Objects.requireNonNull(root.listFiles(f -> f.isDirectory() && !f.getName().equals("Instrument"))));
   }
 
   private boolean isLaneComplete(Path laneDir, IlluminaNotificationDto dto) {
@@ -236,7 +220,7 @@ public final class DefaultIllumina extends RunProcessor {
           @Override
           public Instant deserialize(
               JsonParser jsonParser, DeserializationContext deserializationContext)
-              throws IOException, JsonProcessingException {
+              throws IOException {
             String inststr = jsonParser.getText();
             try {
               return ZonedDateTime.parse(inststr).toInstant();
@@ -260,15 +244,13 @@ public final class DefaultIllumina extends RunProcessor {
             .redirectError(Redirect.INHERIT);
     builder.environment().put("TZ", tz.getID());
     Process process = builder.start();
-
     IlluminaNotificationDto dto;
     int exitcode;
-    try (InputStream output = process.getInputStream();
-        OutputStream input = process.getOutputStream()) {
+    try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
       dto =
           new ObjectMapper()
               .registerModule(setUpCustomModule(tz))
-              .readValue(output, IlluminaNotificationDto.class);
+              .readValue(reader, IlluminaNotificationDto.class);
       dto.setSequencerFolderPath(runDirectory.getAbsolutePath());
     } finally {
       try {
@@ -515,21 +497,6 @@ public final class DefaultIllumina extends RunProcessor {
    */
   public static boolean isStringEmptyOrNull(String s) {
     return "".equals(s) || s == null;
-  }
-
-  public static <T> Predicate<T> rejectUntil(Predicate<T> check) {
-    return new Predicate<T>() {
-      private boolean state = false;
-
-      @Override
-      public boolean test(T t) {
-        if (state) {
-          return true;
-        }
-        state = check.test(t);
-        return false;
-      }
-    };
   }
 
   @Override
