@@ -238,28 +238,26 @@ public final class DefaultIllumina extends RunProcessor {
     // Call the C++ program to do the real work and write a notification DTO to standard output. The
     // C++ object has no direct binding to the
     // DTO, so any changes to the DTO must be manually changed in the C++ code.
+    final File tmpFile = new File("/tmp", "runscanner-illumina-" + runDirectory.getName() + ".json");
     ProcessBuilder builder =
         new ProcessBuilder("nice", "runscanner-illumina", runDirectory.getAbsolutePath())
-            .directory(runDirectory)
-            .redirectError(Redirect.INHERIT);
+                .directory(runDirectory)
+                .redirectOutput(tmpFile)
+                .redirectError(Redirect.INHERIT);
     builder.environment().put("TZ", tz.getID());
     Process process = builder.start();
     IlluminaNotificationDto dto;
     int exitcode;
-    try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-      dto =
-          new ObjectMapper()
+    try {
+      exitcode = process.waitFor();
+      dto = new ObjectMapper()
               .registerModule(setUpCustomModule(tz))
-              .readValue(reader, IlluminaNotificationDto.class);
+              .readValue(tmpFile, IlluminaNotificationDto.class);
       dto.setSequencerFolderPath(runDirectory.getAbsolutePath());
+    } catch (InterruptedException e) {
+      throw new IOException(e);
     } finally {
-      try {
-        exitcode = process.waitFor();
-      } catch (InterruptedException e) {
-        throw new IOException(e);
-      } finally {
-        process.destroy();
-      }
+      process.destroy();
     }
 
     if (exitcode != 0) {
